@@ -1,24 +1,18 @@
-import logo from './logo.svg';
-import './App.css';
+import React, { useEffect } from "react";
+import { Box,} from "@mui/material";
+import Routes from "./routes";
+import Footer from "./components/Navbar/footer";
 
 function App() {
+  //useEffect
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <Box sx={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <Box sx={{ flex: 1 }}>
+        <Routes />
+      </Box>
+
+     <Footer/>
+    </Box>
   );
 }
 

@@ -22,7 +22,7 @@ export default function Footer() {
               lineHeight: 1.6,
             }}
           >
-            © 2025 Loja-Ecuador | Millan Paul Alverca Gaona | mpalverca | 0985428903
+            © 2025 | Loja-Ecuador | Millan Paul Alverca Gaona | mpalverca | 0985428903
             {/* <Link
               href="https://www.loja.gob.ec/"
               target="_blank"

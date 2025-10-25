@@ -72,7 +72,6 @@ export default function Home() {
           mx: "auto",
         }}
       >
-      
       </Box>
 
       {/* Footer informativo */}

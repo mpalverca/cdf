@@ -13,9 +13,9 @@ export default function Body() {
   const [error, setError] = useState(null);
   const [showObjectsPanel, setShowObjectsPanel] = useState(false);
   const [arObjects, setArObjects] = useState([]);
+  const [debugInfo, setDebugInfo] = useState("");
   const sceneRef = useRef(null);
 
-  // Coordenadas de los objetos (lat, lon) con alturas fijas
   const objectLocations = [
     {
       id: 1,
@@ -46,7 +46,6 @@ export default function Body() {
     }
   ];
 
-  // Calcular distancia entre dos coordenadas (Haversine formula)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -56,25 +55,18 @@ export default function Body() {
       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
       Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    const distance = R * c * 1000;
-    return distance;
+    return R * c * 1000;
   };
 
-  // Obtener ubicación del usuario
   const getUserLocation = () => {
     return new Promise((resolve, reject) => {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
             const { latitude, longitude, accuracy } = position.coords;
-            const location = { 
-              latitude, 
-              longitude, 
-              accuracy 
-            };
+            const location = { latitude, longitude, accuracy };
             setUserLocation(location);
             
-            // Calcular distancias a los objetos
             const objectsWithDistances = objectLocations.map(obj => ({
               ...obj,
               distance: calculateDistance(latitude, longitude, obj.coordinates.latitude, obj.coordinates.longitude)
@@ -84,410 +76,266 @@ export default function Body() {
             resolve(location);
           },
           (error) => {
-            console.error("Error obteniendo ubicación:", error);
             setError("No se pudo obtener la ubicación. Asegúrate de permitir el acceso.");
             reject(error);
           },
-          {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 60000
-          }
+          { enableHighAccuracy: true, timeout: 15000 }
         );
       } else {
-        const error = "La geolocalización no es soportada por este navegador.";
-        setError(error);
-        reject(new Error(error));
+        setError("La geolocalización no es soportada.");
+        reject(new Error("Geolocation not supported"));
       }
     });
   };
 
-  // Solicitar acceso a la cámara
-  const getCameraAccess = () => {
-    return new Promise((resolve, reject) => {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        navigator.mediaDevices.getUserMedia({ 
+  const getCameraAccess = async () => {
+    try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { 
             facingMode: 'environment',
             width: { ideal: 1280 },
             height: { ideal: 720 }
           } 
-        })
-        .then((stream) => {
-          setCameraAccess(true);
-          resolve(stream);
-        })
-        .catch((error) => {
-          console.error("Error accediendo a la cámara:", error);
-          setError("No se pudo acceder a la cámara. Asegúrate de permitir el acceso.");
-          reject(error);
         });
+        setCameraAccess(true);
+        setDebugInfo("Cámara accedida correctamente");
+        return stream;
       } else {
-        const error = "El acceso a la cámara no es soportado por este navegador.";
-        setError(error);
-        reject(new Error(error));
+        throw new Error("Camera not supported");
       }
-    });
-  };
-
-  // Iniciar experiencia AR
-  const startARExperience = async () => {
-    try {
-      setError(null);
-      
-      await getUserLocation();
-      await getCameraAccess();
-      
-      setArStarted(true);
-      
     } catch (error) {
-      console.error("Error iniciando AR:", error);
-      setArStarted(false);
+      setError("No se pudo acceder a la cámara: " + error.message);
+      throw error;
     }
   };
 
-  // Detener experiencia AR
+  const startARExperience = async () => {
+    try {
+      setError(null);
+      setDebugInfo("Iniciando experiencia AR...");
+      await getUserLocation();
+      await getCameraAccess();
+      setArStarted(true);
+      setDebugInfo("AR iniciado - La cámara debería estar activa");
+    } catch (error) {
+      setArStarted(false);
+      setDebugInfo("Error al iniciar AR");
+    }
+  };
+
   const stopARExperience = () => {
     setArStarted(false);
     setCameraAccess(false);
+    setDebugInfo("AR detenido");
   };
 
-  // Actualizar ubicación
-  const updateLocation = () => {
-    getUserLocation();
-  };
-
-  // Renderizar objetos 3D para A-Frame
-  const renderAFrameObjects = () => {
-    return arObjects.map(obj => (
-      <a-entity 
-        key={obj.id}
-        gps-entity-place={`latitude: ${obj.coordinates.latitude}; longitude: ${obj.coordinates.longitude};`}
+  // Configuración optimizada de A-Frame
+  const renderAFrameScene = () => {
+    return (
+      <a-scene 
+        ref={sceneRef}
+        embedded
+        arjs='sourceType: webcam; sourceWidth: 1280; sourceHeight: 720; displayWidth: 1280; displayHeight: 720; debugUIEnabled: true;'
+        vr-mode-ui="enabled: false"
+        renderer="antialias: true; alpha: true; precision: medium;"
+        style={{ width: '100%', height: '100%' }}
       >
-        {/* Torre Futurista */}
-        {obj.type === 'tower' && (
-          <a-entity>
-            <a-cylinder 
-              position={`0 ${obj.height/2} 0`}
-              radius="1"
-              height={obj.height}
-              color="#4a4a4a"
-            ></a-cylinder>
-            <a-cylinder 
-              position={`0 ${obj.height/2 + 2} 0`}
-              radius="0.3"
-              height="4"
-              color={obj.color}
-            ></a-cylinder>
-            <a-sphere 
-              position={`0 ${obj.height} 0`}
-              radius="0.8"
-              color="#ff6b6b"
-            ></a-sphere>
-            <a-light 
-              type="point" 
-              color="#ff4444" 
-              intensity="1"
-              position={`0 ${obj.height} 0`}
-            ></a-light>
+        {/* Marker basado en patrón - MÁS CONFIABLE */}
+        <a-marker 
+          id="animated-marker" 
+          type="pattern" 
+          url="https://raw.githubusercontent.com/AR-js-org/AR.js/master/aframe/examples/image-tracking/nft/trex/trex-pattern.json"
+          smooth="true"
+          smoothCount="10"
+          smoothTolerance="0.01"
+          smoothThreshold="5"
+        >
+          {/* Torre Futurista */}
+          <a-entity position="0 0.5 0">
+            <a-cylinder position="0 1 0" radius="0.3" height="2" color="#00ff88"></a-cylinder>
+            <a-sphere position="0 2.2 0" radius="0.4" color="#ff6b6b"></a-sphere>
+            <a-light type="point" color="#ff4444" intensity="2" position="0 2.2 0"></a-light>
           </a-entity>
-        )}
+          
+          <a-text 
+            value="🏢 Torre Futurista" 
+            position="0 3 0" 
+            align="center" 
+            color="white"
+            scale="2 2 2"
+          ></a-text>
+        </a-marker>
+
+        {/* Marker alternativo más simple */}
+        <a-marker id="simple-marker" preset="hiro">
+          <a-box position="0 0.5 0" rotation="0 45 0" color="#4CC3D9"></a-box>
+          <a-sphere position="0 1.25 0" radius="0.5" color="#EF2D5E"></a-sphere>
+          <a-text value="☀️ Panel Solar" position="0 2 0" align="center" color="white"></a-text>
+        </a-marker>
+
+        {/* Marker tipo kanji */}
+        <a-marker id="kanji-marker" type="pattern" url="https://raw.githubusercontent.com/AR-js-org/AR.js/master/aframe/examples/image-tracking/nft/trex/trex-pattern.json">
+          <a-cylinder position="0 1 0" radius="0.5" height="2" color="#3498db" opacity="0.7"></a-cylinder>
+          <a-text value="🏠 Habitat" position="0 2.5 0" align="center" color="white"></a-text>
+        </a-marker>
+
+        {/* Cámara */}
+        <a-entity camera></a-entity>
+      </a-scene>
+    );
+  };
+
+  // Versión alternativa SIN marcadores (solo cámara)
+  const renderSimpleCameraScene = () => {
+    return (
+      <a-scene 
+        embedded
+        stats
+        arjs='sourceType: webcam; debugUIEnabled: true; detectionMode: mono;'
+        vr-mode-ui="enabled: false"
+        style={{ width: '100%', height: '100%' }}
+      >
+        {/* Solo mostrar la cámara sin marcadores */}
+        <a-entity camera></a-entity>
         
-        {/* Panel Solar */}
-        {obj.type === 'solar' && (
-          <a-entity>
-            <a-box 
-              position={`0 ${obj.height} 0`}
-              width="3"
-              height="0.1"
-              depth="2"
-              color={obj.color}
-            ></a-box>
-            <a-cylinder 
-              position="0 0 0"
-              radius="0.3"
-              height={obj.height}
-              color="#7f8c8d"
-            ></a-cylinder>
-          </a-entity>
-        )}
+        {/* Añadir un objeto simple en posición fija para test */}
+        <a-box 
+          position="0 0 -3" 
+          rotation="0 45 0" 
+          color="#4CC3D9"
+          animation="property: rotation; to: 0 360 0; loop: true; dur: 10000"
+        ></a-box>
         
-        {/* Habitat Futurista */}
-        {obj.type === 'habitat' && (
-          <a-entity>
-            <a-sphere 
-              position={`0 ${obj.height} 0`}
-              radius="2"
-              color={obj.color}
-              opacity="0.7"
-            ></a-sphere>
-            <a-cylinder 
-              position="0 0 0"
-              radius="2.2"
-              height="0.5"
-              color="#95a5a6"
-            ></a-cylinder>
-          </a-entity>
-        )}
-        
-        {/* Etiqueta de distancia - simplificada */}
         <a-text 
-          value={`${obj.name}\n${obj.distance.toFixed(1)}m`}
-          position={`0 ${obj.height + 3} 0`}
-          align="center"
+          value="CÁMARA FUNCIONANDO" 
+          position="0 1.5 -3" 
+          align="center" 
           color="white"
           scale="2 2 2"
         ></a-text>
-      </a-entity>
-    ));
+      </a-scene>
+    );
   };
 
-  useEffect(() => {
-    return () => {
-      // Cleanup
-    };
-  }, []);
-
   return (
-    <Box
-      sx={{
-        display: "grid",
-        gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" },
-        gap: 3,
-        maxWidth: "1300px",
-        mx: "auto",
-        position: 'relative',
-        minHeight: '80vh'
-      }}
-    >
+    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 3, maxWidth: "1300px", mx: "auto" }}>
+      
       {/* Panel de Control */}
       <Card sx={{ p: 2 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Control AR - A-Frame GPS
-          </Typography>
+          <Typography variant="h6" gutterBottom>Control AR - Debug</Typography>
           
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          
+          {debugInfo && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              {debugInfo}
             </Alert>
           )}
 
           <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" gutterBottom>
-              Tu ubicación:
-            </Typography>
-            {userLocation ? (
-              <Box>
-                <Chip 
-                  label={`Lat: ${userLocation.latitude.toFixed(6)}`} 
-                  color="success" 
-                  size="small" 
-                  sx={{ mr: 1, mb: 1 }}
-                />
-                <Chip 
-                  label={`Lon: ${userLocation.longitude.toFixed(6)}`} 
-                  color="success" 
-                  size="small" 
-                  sx={{ mb: 1 }}
-                />
-                <Chip 
-                  label={`Precisión: ${userLocation.accuracy.toFixed(0)}m`} 
-                  color="info" 
-                  size="small" 
-                />
-              </Box>
-            ) : (
-              <Chip 
-                label="Esperando ubicación..." 
-                color="default" 
-                size="small" 
-              />
-            )}
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="body2" gutterBottom>
-              Estado de la cámara:
-            </Typography>
-            {cameraAccess ? (
-              <Chip 
-                label="Cámara activa" 
-                color="success" 
-                size="small" 
-              />
-            ) : (
-              <Chip 
-                label="Cámara no disponible" 
-                color="default" 
-                size="small" 
-              />
-            )}
+            <Typography variant="body2" gutterBottom>Estado:</Typography>
+            {userLocation && <Chip label="📍 Ubicación OK" color="success" size="small" sx={{ mr: 1 }} />}
+            {cameraAccess && <Chip label="📷 Cámara OK" color="success" size="small" />}
+            {!userLocation && !cameraAccess && <Chip label="Esperando..." color="default" size="small" />}
           </Box>
 
           {!arStarted ? (
-            <Button 
-              variant="contained" 
-              onClick={startARExperience}
-              fullWidth
-              sx={{ mb: 1 }}
-              startIcon={<Navigation />}
-            >
-              Iniciar Experiencia AR
+            <Button variant="contained" onClick={startARExperience} fullWidth sx={{ mb: 1 }} startIcon={<Navigation />}>
+              Iniciar AR
             </Button>
           ) : (
-            <Button 
-              variant="outlined" 
-              color="error"
-              onClick={stopARExperience}
-              fullWidth
-              sx={{ mb: 1 }}
-              startIcon={<Close />}
-            >
+            <Button variant="outlined" color="error" onClick={stopARExperience} fullWidth sx={{ mb: 1 }} startIcon={<Close />}>
               Detener AR
             </Button>
           )}
 
-          {arStarted && (
-            <Button 
-              variant="outlined" 
-              onClick={updateLocation}
-              fullWidth
-              sx={{ mb: 1 }}
-            >
-              Actualizar Ubicación
-            </Button>
-          )}
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 2, display: 'block' }}>
+            Usa los marcadores de prueba para ver los objetos 3D
+          </Typography>
         </CardContent>
       </Card>
 
       {/* Lista de Objetos */}
       <Card sx={{ p: 2 }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Objetos AR Disponibles
-          </Typography>
-          
+          <Typography variant="h6" gutterBottom>Objetos Disponibles</Typography>
           {arObjects.map(obj => (
             <Box key={obj.id} sx={{ mb: 2, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              <Typography variant="subtitle2" color="primary">
-                {obj.name}
-              </Typography>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                {obj.description}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Altura: {obj.height}m
-              </Typography>
+              <Typography variant="subtitle2" color="primary">{obj.name}</Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}>{obj.description}</Typography>
               {userLocation && (
-                <Box sx={{ mt: 1 }}>
-                  <Chip 
-                    label={`${obj.distance.toFixed(1)} metros`}
-                    color={obj.distance < 100 ? "success" : obj.distance < 500 ? "warning" : "default"}
-                    size="small"
-                    variant="outlined"
-                  />
-                </Box>
+                <Chip label={`${obj.distance.toFixed(1)} metros`} color="info" size="small" variant="outlined" />
               )}
             </Box>
           ))}
         </CardContent>
       </Card>
 
-      {/* Vista AR con A-Frame */}
+      {/* Vista AR */}
       {arStarted && (
         <Box sx={{ gridColumn: { xs: "1", md: "1 / -1" } }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Vista AR - Cámara en Tiempo Real
+                Vista AR - {cameraAccess ? "Cámara Activa" : "Esperando Cámara"}
               </Typography>
               
-              <Box sx={{ width: '100%', height: '500px', position: 'relative', overflow: 'hidden' }}>
-                <a-scene 
-                  ref={sceneRef}
-                  embedded 
-                  arjs="sourceType: webcam; debugUIEnabled: false;"
-                  vr-mode-ui="enabled: false"
-                  renderer="logarithmicDepthBuffer: true;"
-                >
-                  {/* Configuración mínima de la escena */}
-                  <a-assets>
-                    {/* Assets si los necesitas */}
-                  </a-assets>
-
-                  {/* Cámara AR */}
-                  <a-entity camera></a-entity>
-                  
-                  {/* Sistema GPS */}
-                  <a-entity gps-camera rotation-reader></a-entity>
-                  
-                  {/* Objetos en ubicaciones GPS */}
-                  {renderAFrameObjects()}
-                  
-                  {/* Luces */}
-                  <a-light type="ambient" color="#FFFFFF" intensity="0.6"></a-light>
-                  <a-light type="directional" color="#FFFFFF" intensity="0.8" position="1 1 1"></a-light>
-                </a-scene>
+              <Box sx={{ 
+                width: '100%', 
+                height: '500px', 
+                position: 'relative', 
+                overflow: 'hidden', 
+                border: '2px solid green',
+                backgroundColor: 'black'
+              }}>
+                {renderSimpleCameraScene()}
               </Box>
 
-              <Typography variant="body2" sx={{ mt: 2 }} color="text.secondary">
-                <strong>Instrucciones:</strong> Los objetos están fijos en sus coordenadas GPS. 
-                Mueve tu dispositivo para verlos superpuestos en la cámara.
-              </Typography>
+              <Box sx={{ mt: 2, p: 2, backgroundColor: 'grey.100', borderRadius: 1 }}>
+                <Typography variant="subtitle2" gutterBottom>Instrucciones de Prueba:</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  1. <strong>Permite el acceso a la cámara</strong> cuando el navegador lo solicite<br />
+                  2. <strong>Apunta la cámara</strong> a tu entorno<br />
+                  3. Deberías ver <strong>un cubo azul giratorio</strong> si la cámara funciona<br />
+                  4. Para marcadores, descarga e imprime:{" "}
+                  <a 
+                    href="https://raw.githubusercontent.com/AR-js-org/AR.js/master/data/images/hiro.png" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    style={{ color: 'blue', textDecoration: 'underline' }}
+                  >
+                    Marcador HIRO
+                  </a>
+                </Typography>
+              </Box>
             </CardContent>
           </Card>
         </Box>
       )}
 
-      {/* Botón Flotante */}
+      {/* Botones flotantes */}
       {arStarted && (
-        <Fab
-          color="primary"
-          aria-label="objetos"
-          sx={{
-            position: 'fixed',
-            bottom: 16,
-            right: 16,
-            zIndex: 1000
-          }}
-          onClick={() => setShowObjectsPanel(true)}
-        >
-          <Add />
-        </Fab>
+        <>
+          <Fab color="primary" sx={{ position: 'fixed', bottom: 16, right: 16 }} onClick={() => setShowObjectsPanel(true)}>
+            <Add />
+          </Fab>
+        </>
       )}
 
-      {/* Diálogo de Objetos */}
-      <Dialog 
-        open={showObjectsPanel} 
-        onClose={() => setShowObjectsPanel(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Objetos AR - Distancias</DialogTitle>
+      <Dialog open={showObjectsPanel} onClose={() => setShowObjectsPanel(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Información de Objetos</DialogTitle>
         <DialogContent>
           {arObjects.map(obj => (
             <Box key={obj.id} sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              <Typography variant="h6" color="primary">
-                {obj.name}
-              </Typography>
-              <Typography variant="body2" sx={{ mb: 1 }}>
-                {obj.description}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Coordenadas:</strong> {obj.coordinates.latitude.toFixed(6)}, {obj.coordinates.longitude.toFixed(6)}
-              </Typography>
-              {userLocation && (
-                <Typography variant="h6" color={obj.distance < 100 ? "success.main" : obj.distance < 500 ? "warning.main" : "text.primary"}>
-                  📍 {obj.distance.toFixed(1)} metros
-                </Typography>
-              )}
+              <Typography variant="h6" color="primary">{obj.name}</Typography>
+              <Typography variant="body2">{obj.description}</Typography>
+              {userLocation && <Typography variant="h6" color="primary">📍 {obj.distance.toFixed(1)}m</Typography>}
             </Box>
           ))}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowObjectsPanel(false)}>Cerrar</Button>
-        </DialogActions>
+        <DialogActions><Button onClick={() => setShowObjectsPanel(false)}>Cerrar</Button></DialogActions>
       </Dialog>
     </Box>
   );

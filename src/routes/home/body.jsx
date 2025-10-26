@@ -1,19 +1,64 @@
 // Body.jsx
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Card, CardContent, Typography, Button, Chip, Alert } from "@mui/material";
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { 
+  Box, Card, CardContent, Typography, Button, Chip, Alert,
+  Fab, Dialog, DialogTitle, DialogContent, DialogActions 
+} from "@mui/material";
+import { Add, Close, Navigation } from "@mui/icons-material";
 
 export default function Body() {
   const [userLocation, setUserLocation] = useState(null);
   const [arStarted, setArStarted] = useState(false);
   const [cameraAccess, setCameraAccess] = useState(false);
   const [error, setError] = useState(null);
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
+  const [showObjectsPanel, setShowObjectsPanel] = useState(false);
+  const [arObjects, setArObjects] = useState([]);
   const sceneRef = useRef(null);
-  const rendererRef = useRef(null);
-  const cameraRef = useRef(null);
+
+  // Coordenadas de los objetos (lat, lon) con alturas fijas
+  const objectLocations = [
+    {
+      id: 1,
+      name: "🏢 Torre Futurista",
+      description: "Estructura energética con núcleo luminoso",
+      coordinates: { latitude: -3.985215, longitude: -79.206958 },
+      height: 10,
+      type: "tower",
+      color: "#00ff88"
+    },
+    {
+      id: 2,
+      name: "☀️ Panel Solar",
+      description: "Tecnología de energía renovable avanzada",
+      coordinates: { latitude: -3.985500, longitude: -79.207200 },
+      height: 2,
+      type: "solar",
+      color: "#2c3e50"
+    },
+    {
+      id: 3,
+      name: "🏠 Habitat Futurista",
+      description: "Cúpula residencial transparente",
+      coordinates: { latitude: -3.985943, longitude: -79.207433 },
+      height: 5,
+      type: "habitat",
+      color: "#3498db"
+    }
+  ];
+
+  // Calcular distancia entre dos coordenadas (Haversine formula)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const distance = R * c * 1000;
+    return distance;
+  };
 
   // Obtener ubicación del usuario
   const getUserLocation = () => {
@@ -28,7 +73,14 @@ export default function Body() {
               accuracy 
             };
             setUserLocation(location);
-            console.log("Ubicación obtenida:", location);
+            
+            // Calcular distancias a los objetos
+            const objectsWithDistances = objectLocations.map(obj => ({
+              ...obj,
+              distance: calculateDistance(latitude, longitude, obj.coordinates.latitude, obj.coordinates.longitude)
+            }));
+            setArObjects(objectsWithDistances);
+            
             resolve(location);
           },
           (error) => {
@@ -56,16 +108,12 @@ export default function Body() {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
         navigator.mediaDevices.getUserMedia({ 
           video: { 
-            facingMode: 'environment', // Usar cámara trasera en móviles
+            facingMode: 'environment',
             width: { ideal: 1280 },
             height: { ideal: 720 }
           } 
         })
         .then((stream) => {
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.play();
-          }
           setCameraAccess(true);
           resolve(stream);
         })
@@ -82,187 +130,15 @@ export default function Body() {
     });
   };
 
-  // Inicializar escena Three.js con AR
-  const initARScene = () => {
-    if (!canvasRef.current) return;
-
-    // Escena
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-
-    // Cámara - ajustada para AR
-    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.set(0, 0, 0);
-    cameraRef.current = camera;
-
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ 
-      canvas: canvasRef.current, 
-      alpha: true,
-      antialias: true 
-    });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    rendererRef.current = renderer;
-
-    // Luz ambiental para mejor visualización
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
-    scene.add(ambientLight);
-
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(5, 10, 7);
-    scene.add(directionalLight);
-
-    // Crear objetos 3D basados en geolocalización
-    createGeolocatedObjects(scene);
-
-    // Animación
-    const animate = () => {
-      requestAnimationFrame(animate);
-      
-      // Rotar objetos si existen
-      if (sceneRef.current) {
-        sceneRef.current.children.forEach(child => {
-          if (child.userData && child.userData.rotatable) {
-            child.rotation.y += 0.01;
-          }
-        });
-      }
-
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    // Manejar redimensionado
-    const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    };
-
-    window.addEventListener('resize', handleResize);
-  };
-
-  // Crear objetos 3D basados en geolocalización
-  const createGeolocatedObjects = (scene) => {
-    // Limpiar objetos anteriores
-    while(scene.children.length > 2) { // Mantener las luces
-      scene.remove(scene.children[2]);
-    }
-
-    // Objeto 1: Torre futurista (posición relativa basada en ubicación)
-    const createFuturisticTower = (x, y, z) => {
-      const group = new THREE.Group();
-      
-      // Base
-      const baseGeometry = new THREE.CylinderGeometry(0.3, 0.5, 0.1, 32);
-      const baseMaterial = new THREE.MeshPhongMaterial({ color: 0x4a4a4a });
-      const base = new THREE.Mesh(baseGeometry, baseMaterial);
-      group.add(base);
-
-      // Torre principal
-      const towerGeometry = new THREE.CylinderGeometry(0.1, 0.2, 1.5, 32);
-      const towerMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff88 });
-      const tower = new THREE.Mesh(towerGeometry, towerMaterial);
-      tower.position.y = 0.8;
-      group.add(tower);
-
-      // Esfera superior
-      const sphereGeometry = new THREE.SphereGeometry(0.15, 32, 32);
-      const sphereMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0xff6b6b,
-        emissive: 0x442222
-      });
-      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      sphere.position.y = 1.6;
-      group.add(sphere);
-
-      group.position.set(x, y, z);
-      group.userData = { rotatable: true, type: 'futuristic_tower' };
-      return group;
-    };
-
-    // Objeto 2: Energía solar
-    const createSolarPanel = (x, y, z) => {
-      const group = new THREE.Group();
-      
-      // Panel solar
-      const panelGeometry = new THREE.BoxGeometry(0.8, 0.02, 0.5);
-      const panelMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0x2c3e50,
-        emissive: 0x1a2530
-      });
-      const panel = new THREE.Mesh(panelGeometry, panelMaterial);
-      group.add(panel);
-
-      // Base
-      const baseGeometry = new THREE.CylinderGeometry(0.05, 0.08, 0.3, 8);
-      const baseMaterial = new THREE.MeshPhongMaterial({ color: 0x7f8c8d });
-      const base = new THREE.Mesh(baseGeometry, baseMaterial);
-      base.position.y = -0.16;
-      group.add(base);
-
-      group.position.set(x, y, z);
-      group.userData = { rotatable: false, type: 'solar_panel' };
-      return group;
-    };
-
-    // Objeto 3: Habitat futurista
-    const createFutureHabitat = (x, y, z) => {
-      const group = new THREE.Group();
-      
-      // Cúpula principal
-      const domeGeometry = new THREE.SphereGeometry(0.4, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
-      const domeMaterial = new THREE.MeshPhongMaterial({ 
-        color: 0x3498db,
-        transparent: true,
-        opacity: 0.7
-      });
-      const dome = new THREE.Mesh(domeGeometry, domeMaterial);
-      dome.rotation.x = Math.PI;
-      group.add(dome);
-
-      // Base
-      const baseGeometry = new THREE.CylinderGeometry(0.45, 0.5, 0.1, 32);
-      const baseMaterial = new THREE.MeshPhongMaterial({ color: 0x95a5a6 });
-      const base = new THREE.Mesh(baseGeometry, baseMaterial);
-      base.position.y = -0.25;
-      group.add(base);
-
-      group.position.set(x, y, z);
-      group.userData = { rotatable: true, type: 'future_habitat' };
-      return group;
-    };
-
-    // Posicionar objetos en el mundo AR
-    // Estos valores podrían calcularse basándose en la ubicación real del usuario
-    const tower = createFuturisticTower(-2, 0, -5);
-    const solarPanel = createSolarPanel(2, 0, -5);
-    const habitat = createFutureHabitat(0, 0, -7);
-
-    scene.add(tower);
-    scene.add(solarPanel);
-    scene.add(habitat);
-
-    console.log("Objetos 3D creados y posicionados");
-  };
-
-  // Iniciar experiencia AR completa
+  // Iniciar experiencia AR
   const startARExperience = async () => {
     try {
       setError(null);
-      setArStarted(true);
       
-      // Obtener ubicación primero
       await getUserLocation();
-      
-      // Luego acceder a la cámara
       await getCameraAccess();
       
-      // Finalmente inicializar la escena AR
-      setTimeout(() => {
-        initARScene();
-      }, 1000);
+      setArStarted(true);
       
     } catch (error) {
       console.error("Error iniciando AR:", error);
@@ -272,21 +148,103 @@ export default function Body() {
 
   // Detener experiencia AR
   const stopARExperience = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
-    }
     setArStarted(false);
     setCameraAccess(false);
   };
 
+  // Actualizar ubicación
+  const updateLocation = () => {
+    getUserLocation();
+  };
+
+  // Renderizar objetos 3D para A-Frame
+  const renderAFrameObjects = () => {
+    return arObjects.map(obj => (
+      <a-entity 
+        key={obj.id}
+        gps-entity-place={`latitude: ${obj.coordinates.latitude}; longitude: ${obj.coordinates.longitude};`}
+      >
+        {/* Torre Futurista */}
+        {obj.type === 'tower' && (
+          <a-entity>
+            <a-cylinder 
+              position={`0 ${obj.height/2} 0`}
+              radius="1"
+              height={obj.height}
+              color="#4a4a4a"
+            ></a-cylinder>
+            <a-cylinder 
+              position={`0 ${obj.height/2 + 2} 0`}
+              radius="0.3"
+              height="4"
+              color={obj.color}
+            ></a-cylinder>
+            <a-sphere 
+              position={`0 ${obj.height} 0`}
+              radius="0.8"
+              color="#ff6b6b"
+            ></a-sphere>
+            <a-light 
+              type="point" 
+              color="#ff4444" 
+              intensity="1"
+              position={`0 ${obj.height} 0`}
+            ></a-light>
+          </a-entity>
+        )}
+        
+        {/* Panel Solar */}
+        {obj.type === 'solar' && (
+          <a-entity>
+            <a-box 
+              position={`0 ${obj.height} 0`}
+              width="3"
+              height="0.1"
+              depth="2"
+              color={obj.color}
+            ></a-box>
+            <a-cylinder 
+              position="0 0 0"
+              radius="0.3"
+              height={obj.height}
+              color="#7f8c8d"
+            ></a-cylinder>
+          </a-entity>
+        )}
+        
+        {/* Habitat Futurista */}
+        {obj.type === 'habitat' && (
+          <a-entity>
+            <a-sphere 
+              position={`0 ${obj.height} 0`}
+              radius="2"
+              color={obj.color}
+              opacity="0.7"
+            ></a-sphere>
+            <a-cylinder 
+              position="0 0 0"
+              radius="2.2"
+              height="0.5"
+              color="#95a5a6"
+            ></a-cylinder>
+          </a-entity>
+        )}
+        
+        {/* Etiqueta de distancia - simplificada */}
+        <a-text 
+          value={`${obj.name}\n${obj.distance.toFixed(1)}m`}
+          position={`0 ${obj.height + 3} 0`}
+          align="center"
+          color="white"
+          scale="2 2 2"
+        ></a-text>
+      </a-entity>
+    ));
+  };
+
   useEffect(() => {
-    // Cleanup al desmontar el componente
     return () => {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        tracks.forEach(track => track.stop());
-      }
+      // Cleanup
     };
   }, []);
 
@@ -298,13 +256,15 @@ export default function Body() {
         gap: 3,
         maxWidth: "1300px",
         mx: "auto",
+        position: 'relative',
+        minHeight: '80vh'
       }}
     >
       {/* Panel de Control */}
       <Card sx={{ p: 2 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
-            Control AR
+            Control AR - A-Frame GPS
           </Typography>
           
           {error && (
@@ -315,14 +275,28 @@ export default function Body() {
 
           <Box sx={{ mb: 2 }}>
             <Typography variant="body2" gutterBottom>
-              Estado de la ubicación:
+              Tu ubicación:
             </Typography>
             {userLocation ? (
-              <Chip 
-                label={`Ubicación obtenida (${userLocation.accuracy.toFixed(0)}m)`} 
-                color="success" 
-                size="small" 
-              />
+              <Box>
+                <Chip 
+                  label={`Lat: ${userLocation.latitude.toFixed(6)}`} 
+                  color="success" 
+                  size="small" 
+                  sx={{ mr: 1, mb: 1 }}
+                />
+                <Chip 
+                  label={`Lon: ${userLocation.longitude.toFixed(6)}`} 
+                  color="success" 
+                  size="small" 
+                  sx={{ mb: 1 }}
+                />
+                <Chip 
+                  label={`Precisión: ${userLocation.accuracy.toFixed(0)}m`} 
+                  color="info" 
+                  size="small" 
+                />
+              </Box>
             ) : (
               <Chip 
                 label="Esperando ubicación..." 
@@ -357,6 +331,7 @@ export default function Body() {
               onClick={startARExperience}
               fullWidth
               sx={{ mb: 1 }}
+              startIcon={<Navigation />}
             >
               Iniciar Experiencia AR
             </Button>
@@ -367,130 +342,153 @@ export default function Body() {
               onClick={stopARExperience}
               fullWidth
               sx={{ mb: 1 }}
+              startIcon={<Close />}
             >
               Detener AR
             </Button>
           )}
 
-          <Typography variant="caption" color="text.secondary">
-            Asegúrate de permitir el acceso a la ubicación y cámara cuando se solicite.
-          </Typography>
+          {arStarted && (
+            <Button 
+              variant="outlined" 
+              onClick={updateLocation}
+              fullWidth
+              sx={{ mb: 1 }}
+            >
+              Actualizar Ubicación
+            </Button>
+          )}
         </CardContent>
       </Card>
 
-      {/* Información de Objetos */}
+      {/* Lista de Objetos */}
       <Card sx={{ p: 2 }}>
         <CardContent>
           <Typography variant="h6" gutterBottom>
             Objetos AR Disponibles
           </Typography>
           
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" color="primary">
-              🏢 Torre Futurista
-            </Typography>
-            <Typography variant="body2">
-              Estructura energética con núcleo luminoso
-            </Typography>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" color="primary">
-              ☀️ Panel Solar
-            </Typography>
-            <Typography variant="body2">
-              Tecnología de energía renovable avanzada
-            </Typography>
-          </Box>
-
-          <Box sx={{ mb: 2 }}>
-            <Typography variant="subtitle2" color="primary">
-              🏠 Habitat Futurista
-            </Typography>
-            <Typography variant="body2">
-              Cúpula residencial transparente
-            </Typography>
-          </Box>
-
-          <Typography variant="caption" color="text.secondary">
-            Los objetos se posicionan relativamente a tu ubicación actual.
-          </Typography>
+          {arObjects.map(obj => (
+            <Box key={obj.id} sx={{ mb: 2, p: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="subtitle2" color="primary">
+                {obj.name}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {obj.description}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Altura: {obj.height}m
+              </Typography>
+              {userLocation && (
+                <Box sx={{ mt: 1 }}>
+                  <Chip 
+                    label={`${obj.distance.toFixed(1)} metros`}
+                    color={obj.distance < 100 ? "success" : obj.distance < 500 ? "warning" : "default"}
+                    size="small"
+                    variant="outlined"
+                  />
+                </Box>
+              )}
+            </Box>
+          ))}
         </CardContent>
       </Card>
 
-      {/* Vista AR */}
+      {/* Vista AR con A-Frame */}
       {arStarted && (
         <Box sx={{ gridColumn: { xs: "1", md: "1 / -1" } }}>
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Vista de Realidad Aumentada
+                Vista AR - Cámara en Tiempo Real
               </Typography>
               
-              <Box sx={{ position: 'relative', width: '100%', height: '500px' }}>
-                {/* Video de la cámara */}
-                <video
-                  ref={videoRef}
-                  style={{
-                    position: 'absolute',
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    borderRadius: '8px'
-                  }}
-                  muted
-                  playsInline
-                />
-                
-                {/* Canvas de Three.js superpuesto */}
-                <canvas
-                  ref={canvasRef}
-                  style={{
-                    position: 'absolute',
-                    width: '100%',
-                    height: '100%',
-                    top: 0,
-                    left: 0,
-                    zIndex: 1
-                  }}
-                />
+              <Box sx={{ width: '100%', height: '500px', position: 'relative', overflow: 'hidden' }}>
+                <a-scene 
+                  ref={sceneRef}
+                  embedded 
+                  arjs="sourceType: webcam; debugUIEnabled: false;"
+                  vr-mode-ui="enabled: false"
+                  renderer="logarithmicDepthBuffer: true;"
+                >
+                  {/* Configuración mínima de la escena */}
+                  <a-assets>
+                    {/* Assets si los necesitas */}
+                  </a-assets>
+
+                  {/* Cámara AR */}
+                  <a-entity camera></a-entity>
+                  
+                  {/* Sistema GPS */}
+                  <a-entity gps-camera rotation-reader></a-entity>
+                  
+                  {/* Objetos en ubicaciones GPS */}
+                  {renderAFrameObjects()}
+                  
+                  {/* Luces */}
+                  <a-light type="ambient" color="#FFFFFF" intensity="0.6"></a-light>
+                  <a-light type="directional" color="#FFFFFF" intensity="0.8" position="1 1 1"></a-light>
+                </a-scene>
               </Box>
 
               <Typography variant="body2" sx={{ mt: 2 }} color="text.secondary">
-                <strong>Instrucciones:</strong> Mueve tu dispositivo para explorar los objetos 3D en tu entorno. 
-                Los objetos se renderizan superpuestos a la vista de la cámara.
+                <strong>Instrucciones:</strong> Los objetos están fijos en sus coordenadas GPS. 
+                Mueve tu dispositivo para verlos superpuestos en la cámara.
               </Typography>
             </CardContent>
           </Card>
         </Box>
       )}
 
-      {/* Información de Uso */}
-      <Card sx={{ p: 2, gridColumn: { xs: "1", md: "1 / -1" } }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Cómo usar la Experiencia AR
-          </Typography>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(4, 1fr)" }, gap: 2 }}>
-            <Box>
-              <Typography variant="subtitle2" color="primary">1. Permisos</Typography>
-              <Typography variant="body2">Acepta ubicación y cámara cuando se soliciten</Typography>
+      {/* Botón Flotante */}
+      {arStarted && (
+        <Fab
+          color="primary"
+          aria-label="objetos"
+          sx={{
+            position: 'fixed',
+            bottom: 16,
+            right: 16,
+            zIndex: 1000
+          }}
+          onClick={() => setShowObjectsPanel(true)}
+        >
+          <Add />
+        </Fab>
+      )}
+
+      {/* Diálogo de Objetos */}
+      <Dialog 
+        open={showObjectsPanel} 
+        onClose={() => setShowObjectsPanel(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Objetos AR - Distancias</DialogTitle>
+        <DialogContent>
+          {arObjects.map(obj => (
+            <Box key={obj.id} sx={{ mb: 2, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="h6" color="primary">
+                {obj.name}
+              </Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}>
+                {obj.description}
+              </Typography>
+              <Typography variant="body2">
+                <strong>Coordenadas:</strong> {obj.coordinates.latitude.toFixed(6)}, {obj.coordinates.longitude.toFixed(6)}
+              </Typography>
+              {userLocation && (
+                <Typography variant="h6" color={obj.distance < 100 ? "success.main" : obj.distance < 500 ? "warning.main" : "text.primary"}>
+                  📍 {obj.distance.toFixed(1)} metros
+                </Typography>
+              )}
             </Box>
-            <Box>
-              <Typography variant="subtitle2" color="primary">2. Iniciar</Typography>
-              <Typography variant="body2">Haz clic en "Iniciar Experiencia AR"</Typography>
-            </Box>
-            <Box>
-              <Typography variant="subtitle2" color="primary">3. Explorar</Typography>
-              <Typography variant="body2">Mueve tu dispositivo para ver los objetos</Typography>
-            </Box>
-            <Box>
-              <Typography variant="subtitle2" color="primary">4. Interactuar</Typography>
-              <Typography variant="body2">Observa los objetos 3D en tu espacio real</Typography>
-            </Box>
-          </Box>
-        </CardContent>
-      </Card>
+          ))}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowObjectsPanel(false)}>Cerrar</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
